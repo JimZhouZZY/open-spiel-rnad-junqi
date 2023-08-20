@@ -24,6 +24,7 @@ import numpy as np
 import pickle
 import time
 import threading
+import warnings
 
 from open_spiel.python.algorithms.rnad import rnad_for_junqi as rnad
 
@@ -39,12 +40,7 @@ flags.DEFINE_string("game_name", "junqi1", "Name of the game")
 loss_values = []
 epochs = []
 
-# matplotlib.use('TkAgg')
-plt.ion()  # Turn on interactive mode for dynamic updating
-fig, ax = plt.subplots()
-ax.set_title('Training Loss Curve')
-ax.set_xlabel('Iteration')
-ax.set_ylabel('Loss')
+
 
 
 def command_line_action(time_step):
@@ -85,18 +81,34 @@ def eval_against_random_bots(env, trained_agents, random_agents, num_episodes):
 class JunQiSolver(rnad.RNaDSolver):
     pass
 
+class HiddenPrints:
+    def __enter__(self):
+        self._original_stdout = sys.stdout
+        sys.stdout = open(os.devnull, 'w')
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        sys.stdout.close()
+        sys.stdout = self._original_stdout
 
 def plot():
-    while not _exit:
-        plt.pause(_TIME_GAP)
-        ax.clear()
-        ax.plot(epochs, loss_values)  # , marker='o', linestyle='-')
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        plt.ion()  # Turn on interactive mode for dynamic updating
+        fig, ax = plt.subplots()
+        # matplotlib.use('TkAgg')
         ax.set_title('Training Loss Curve')
-        ax.set_xlabel('Epoch')
+        ax.set_xlabel('Iteration')
         ax.set_ylabel('Loss')
-        plt.pause(0.01)
-        plt.draw()
-        plt.pause(0.01)
+        while not _exit:
+            plt.pause(_TIME_GAP)
+            ax.clear()
+            ax.plot(epochs, loss_values)  # , marker='o', linestyle='-')
+            ax.set_title('Training Loss Curve')
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Loss')
+            plt.pause(0.01)
+            plt.draw()
+            plt.pause(0.01)
 
 
 
@@ -140,15 +152,17 @@ def main(unused_argv):
     i = 0
     epoch = 1000
     t_list = []
-    threading.Thread(target=plot).run()
+    t_std = time.perf_counter()
+    threading.Thread(target=plot).start()
     while (i <= epoch):
         t_start = time.perf_counter()
         print_loss(rnad_solver.step(), i)
-        i += 1
         t_end = time.perf_counter()
         t_list.append(t_end - t_start)
-        print(f"[INFO] Training in progress: {100 * i / epoch}% [{i} of {epoch} epoches] ETA: " + time.strftime(
+        print(f"[INFO] Training in progress: {100 * i / epoch}% [{i} of {epoch} epoches] "+"Time used: "+time.strftime(
+            "%H:%M:%S", time.gmtime(t_end - t_std))+" ETA: " + time.strftime(
             "%H:%M:%S", time.gmtime(numpy.average(t_list) * (epoch - i))))
+        i += 1
     with open('model.pkl', 'wb') as f:
         pickle.dump(rnad_solver, f)
 
