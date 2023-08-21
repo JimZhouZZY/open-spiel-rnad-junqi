@@ -144,27 +144,10 @@ def main(unused_argv):
     # game = pyspiel.load_game(FLAGS.game_name)
     rnad_solver = JunQiSolver(config)
 
-    '''
+
     with open('model.pkl', 'rb') as f:
         rnad_solver = pickle.load(f)
-    '''
-    i = 0
-    epoch = 1000
-    t_list = []
-    t_std = time.perf_counter()
-    threading.Thread(target=plot).start()
-    while (i <= epoch):
-        t_start = time.perf_counter()
-        print_loss(rnad_solver.step(), i)
-        t_end = time.perf_counter()
-        t_list.append(t_end - t_start)
-        print(
-            f"[INFO] Training in progress: {100 * i / epoch}% [{i} of {epoch} epoches] " + "Time used: " + time.strftime(
-                "%H:%M:%S", time.gmtime(t_end - t_std)) + " ETA: " + time.strftime(
-                "%H:%M:%S", time.gmtime(numpy.average(t_list) * (epoch - i))))
-        i += 1
-    with open('model.pkl', 'wb') as f:
-        pickle.dump(rnad_solver, f)
+
 
     rnad_solver.pit()
 

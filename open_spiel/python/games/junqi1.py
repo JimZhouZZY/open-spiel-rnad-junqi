@@ -13,24 +13,10 @@
 # limitations under the License.
 
 # Lint as python3
-"""Tic tac toe (noughts and crosses), implemented in Python.
-
-This is a demonstration of implementing a deterministic perfect-information
-game in Python.
-
-Python games are significantly slower than C++, but it may still be suitable
-for prototyping or for small games.
-
-It is possible to run C++ algorithms on Python-implemented games. This is likely
-to have good performance if the algorithm simply extracts a game tree and then
-works with that (e.g. CFR algorithms). It is likely to be poor if the algorithm
-relies on processing and updating states as it goes, e.g., MCTS.
-"""
-import random
 import copy
+import enum
 
 import numpy as np
-from open_spiel.python.observation import IIGObserverForPublicInfoGame
 import pyspiel
 
 _NUM_PLAYERS = 2
@@ -59,12 +45,30 @@ _GAME_INFO = pyspiel.GameInfo(
     min_utility=-1.0,
     max_utility=1.0,
     utility_sum=0.0,
-    max_game_length=100 # _NUM_CELLS * _NUM_CELLS
+    max_game_length=100  # _NUM_CELLS * _NUM_CELLS
 )
 
 
+class GamePhase(enum.IntEnum):
+    """Enum game phrase."""
+    DEPLOYING: int = 0
+    SELECTING: int = 1
+    MOVING: int = 2
+
+
+class ChessType(enum.IntEnum):
+    """Enum chess type to make the code easy-reading."""
+    MINE: int = 9
+    GENERAL: int = 8
+    COLONEL: int = 7
+    CAPTAIN: int = 6
+    BOMB: int = 2
+    FLAG: int = 1
+    NONE: int = 0
+
+
 class JunQiGame(pyspiel.Game):
-    """A Python version of the Tic-Tac-Toe game."""
+    """A Python version of the JunQi game."""
 
     def __init__(self, params=None):
         super().__init__(_GAME_TYPE, _GAME_INFO, params or dict())
@@ -81,121 +85,121 @@ class JunQiGame(pyspiel.Game):
 
 
 class JunQiState(pyspiel.State):
-    """A python version of the Tic-Tac-Toe state."""
+    """A python version of the JunQi state."""
+
+    # TODO: Add methods to define and change current game length
 
     def __init__(self, game):
         """Constructor; should only be called by Game.new_initial_state."""
         super().__init__(game)
-        self._cur_player = 0
-        self._player0_score = 0.0
-        self._is_terminal = False
-        self.board = []
-        chesslist = [9, 9, 8, 7, 7, 6, 6, 2, 1]
-        random.shuffle(chesslist)
-        #[self.board.append([Chess(chesslist[i * _NUM_COLS + j], 1) for j in range(_NUM_COLS)]) for i in
-         #range(_NUM_ROWS // 2)]
-        #random.shuffle(chesslist)
-        #[self.board.append([Chess(chesslist[i * _NUM_COLS + j], 0) for j in range(_NUM_COLS)]) for i in
-         #range(_NUM_ROWS // 2)]
-        num_board = [[9, 1, 7],
-                     [2, 9, 7],
-                     [6, 6, 8],
-                     [8, 7, 6],
-                     [7, 9, 2],
-                     [6, 1, 9]]
-        [self.board.append([Chess(num_board[i][j], 1) for j in range(_NUM_COLS)]) for i in range(_NUM_ROWS // 2)]
-        [self.board.append([Chess(num_board[i+3][j], 0) for j in range(_NUM_COLS)]) for i in range(_NUM_ROWS // 2)]
-        pass
+
+        self._cur_player: int = 0
+        self._player0_score: float = 0.0
+        self._is_terminal: bool = False
+
+        self.game_phase: GamePhase = GamePhase.DEPLOYING
+
+        self.selected_pos: list[[int, int], [int, int]] = [[0, 0], [_NUM_ROWS - 1, _NUM_COLS - 1]]
+        self.decode_action: list[[int, int]] = [0, 0] * (_NUM_COLS * _NUM_ROWS)
+        self.board: list[list[Chess]] = [[Chess(0, -1)] * _NUM_ROWS] * _NUM_COLS
+        self.chess_list: list[list[int]] = [[9, 8, 8, 7, 7, 6, 6, 2, 1], [9, 8, 8, 7, 7, 6, 6, 2, 1]]
+        self.obs_mov: list[list[int]] = [[0] * _NUM_COLS] * _NUM_ROWS
+        self.obs_attack: bool = False
+
+        for i in range(_NUM_COLS * _NUM_ROWS):
+            self.decode_action[i] = [i // _NUM_COLS][i % _NUM_ROWS]
 
     # OpenSpiel (PySpiel) API functions are below. This is the standard set that
     # should be implemented by every perfect-information sequential-move game.
 
-    def current_player(self):
+    def current_player(self) -> int or any:
         """Returns id of the next player to move, or TERMINAL if game is over."""
         return pyspiel.PlayerId.TERMINAL if self._is_terminal else self._cur_player
 
-    def _legal_actions(self, player):
-        """Returns a list of legal actions, sorted in ascending order."""
-        actions = []
-        idx = 0
-        for i in range(_NUM_ROWS):
-            for j in range(_NUM_COLS):
-                for k in range(_NUM_ROWS):
-                    for l in range(_NUM_COLS):
-                        if self.is_legal_action([i, j], [k, l]):
-                            actions.append(idx)
-                            flatten_actions[idx] = [[i, j], [k, l]]
-                        idx += 1
-        """
-        for i in range(_NUM_ROWS):
-            for j in range(_NUM_COLS):
-                if self.board[i][j].country == self._cur_player:
-                    for to_pos in [[i+1, j],[i-1, j],[i, j+1],[i, j-1]]:
-                        if (0<=to_pos[0]<_NUM_ROWS and 0<=to_pos[0]<_NUM_COLS
-                                and self.is_legal_action([i, j], to_pos)):
-                            actions.append([i, j], to_pos)
-        """
-        if actions == []:
-            actions.append(324)
-        #print(actions)
+    def _legal_actions(self, player: int) -> list[bool]:
+        """Returns a list of legal actions."""
+        actions: list[bool] = [False] * (_NUM_COLS * _NUM_ROWS)
+        if self.game_phase == GamePhase.DEPLOYING:
+            for i in range(_NUM_COLS * _NUM_ROWS // 2):
+                actions[i] = True if self.chess_list[player][i] != 0 else False
+        elif self.game_phase == GamePhase.SELECTING:
+            for i in range(_NUM_ROWS):
+                for j in range(_NUM_COLS):
+                    if (self.board[i][j].country == player
+                            and self.board[i][j].type != ChessType.MINE
+                            and self.board[i][j].type != ChessType.FLAG):
+                        actions[i * _NUM_COLS + j] = True
+        elif self.game_phase == GamePhase.MOVING:
+            from_pos: list[int, int] = self.selected_pos[player]
+            for to_pos in [[from_pos[0] + 1, from_pos[1]],
+                           [from_pos[0] - 1, from_pos[1]],
+                           [from_pos[0], from_pos[1] + 1],
+                           [from_pos[0], from_pos[1] - 1]]:
+                actions[to_pos[0] * _NUM_COLS + to_pos[1]] = True \
+                    if self._is_legal_destination(to_pos, player) else False
+        surrender: bool = True
+        for action in actions:
+            if action:
+                surrender = False
+                break
+        if surrender:
+            # End game by no legal move.
+            self._is_terminal = True
+            self._player0_score = -1.0 if player == 0 else 1.0
         return actions
 
-    def is_legal_action(self, from_pos, to_pos):
-        # print(self.board[from_pos[0]][from_pos[1]].country,self.current_player())
-        if (self.board[from_pos[0]][from_pos[1]].country == self.current_player()
-                and to_pos in [[from_pos[0] + 1, from_pos[1]],
-                               [from_pos[0] - 1, from_pos[1]],
-                               [from_pos[0], from_pos[1] + 1],
-                               [from_pos[0], from_pos[1] - 1]]
-                and self.board[to_pos[0]][to_pos[1]].country != self.board[from_pos[0]][from_pos[1]].country
-                and self.board[from_pos[0]][from_pos[1]] != 9 and self.board[from_pos[0]][from_pos[1]] != 1):
-            return True
-        else:
-            return False
+    def _is_legal_destination(self, to_pos: list[int, int], player: int) -> bool:
+        """Check whether the destination of a move is legal."""
+        r, c = to_pos[0], to_pos[1]
+        return True if (0 <= r < _NUM_ROWS and 0 <= c < _NUM_COLS
+                        and self.board[r][c].country != player) else False
 
-    def _apply_action(self, action):
+    def _apply_action(self, action: int) -> None:
         """Applies the specified action to the state."""
-        # print(self.serialize())
-        # input()
-        if action == 324:
-            # print("ENDGAME NO MOVE")
-            self._is_terminal = True
-            self._player0_score = -1.0
-            return
-        # print(f"Action:{flatten_actions[action]} AKA {action}")
-        from_pos, to_pos = flatten_actions[action][0], flatten_actions[action][1]
-        attacker = self.board[from_pos[0]][from_pos[1]]
-        if self.board[to_pos[0]][to_pos[1]].country == -1:
-            self.board[to_pos[0]][to_pos[1]] = copy.deepcopy(attacker)
-        else:
-            defender = self.board[to_pos[0]][to_pos[1]]
-            if attacker == 2 or defender == 2 or attacker == defender:
-                self.board[to_pos[0]][to_pos[1]] = Chess(0, -1)
-                if defender == 1:
-                    # print("ENDGAME FLAG CAP")
+        # TODO: Remove copy module if we can, and refactor the code to easier ones.
+        # TODO: Add method to change self.obs_mov and self.obs_attack
+        player = self._cur_player
+        if self.game_phase == GamePhase.DEPLOYING:
+            r, c = self.selected_pos[player][0], self.selected_pos[player][1]
+            self.board[r][c] = Chess(self.chess_list[player][action], player)
+            self.chess_list[player][action] = 0
+            if player == 0:
+                r += (c + 1) // _NUM_COLS
+                c = (c + 1) % _NUM_COLS
+            else:
+                r += (c - 1) // _NUM_COLS
+                c = (c - 1) % _NUM_COLS
+                if r == (_NUM_ROWS // 2) and c == _NUM_COLS - 1:
+                    # Deployment phase ended, start selecting-moving phase
+                    self.game_phase = GamePhase.SELECTING
+            # TODO: Maybe this line is not necessary.
+            self.selected_pos[player][0], self.selected_pos[player][1] = r, c
+            self._cur_player = 1 - self._cur_player
+        elif self.game_phase == GamePhase.SELECTING:
+            self.selected_pos[player] = copy.deepcopy(self.decode_action[action])
+        elif self.game_phase == GamePhase.MOVING:
+            attacker = copy.deepcopy(self.board[self.selected_pos[player][0]][self.selected_pos[player][1]])
+            defender = copy.deepcopy(self.board[self.decode_action[action][0]][self.decode_action[action][1]])
+            if defender.type == ChessType.NONE:
+                self.board[self.decode_action[action][0]][self.decode_action[action][1]] = copy.deepcopy(attacker)
+            else:
+                if defender.type == ChessType.FLAG:
+                    # End game by captured flag.
                     self._is_terminal = True
                     self._player0_score = 1.0 if self._cur_player == 0 else -1.0
-            elif attacker > defender:
-                self.board[to_pos[0]][to_pos[1]] = copy.deepcopy(attacker)
-                if defender == 1:
-                    # print("ENDGAME FLAG CAP")
-                    self._is_terminal = True
-                    self._player0_score = 1.0 if self._cur_player == 0 else -1.0
-            elif attacker < defender:
-                pass
-            if self.no_chess(0):
-                # print("ENDGAME NO CHESS")
-                self._is_terminal = True
-                self._player0_score -= 1.0
-            elif self.no_chess(1):
-                # print("ENDGAME NO CHESS")
-                self._is_terminal = True
-                self._player0_score += 1.0
-        self.board[from_pos[0]][from_pos[1]] = Chess(0, -1)
-        self._cur_player = 1 - self._cur_player
-        return
+                elif (attacker.type == ChessType.BOMB
+                      or defender.type == ChessType.BOMB
+                      or attacker.type == defender.type):
+                    self.board[self.decode_action[action][0]][self.decode_action[action][1]] = Chess(0, -1)
+                elif attacker.type > defender.type:
+                    self.board[self.decode_action[action][0]][self.decode_action[action][1]] = copy.deepcopy(attacker)
+                elif attacker.type < defender.type:
+                    pass
+            self.board[self.selected_pos[player][0]][self.selected_pos[player][1]] = Chess(0, -1)
+            self._cur_player = 1 - self._cur_player
 
-    def _action_to_string(self, player, action):
+    @staticmethod
+    def _action_to_string(player, action):
         """Action -> string."""
         from_pos, to_pos = flatten_actions[action][0], flatten_actions[action][1]
         return "{}({},{})".format("0" if player == 0 else "1", from_pos, to_pos)
@@ -208,18 +212,12 @@ class JunQiState(pyspiel.State):
         """Total reward for each player over the course of the game so far."""
         return [self._player0_score, -self._player0_score]
 
-    def no_chess(self, country):
-        for row in self.board:
-            for chess in row:
-                if chess.country == country and chess != 9 and chess != 1:
-                    return False
-        return True
-
     def serialize(self):
         return _board_to_string(self.board)
 
+    @staticmethod
     def serialize_action(self, action):
-        return(f"Action:{flatten_actions[action]} AKA {action}")
+        return f"Action:{flatten_actions[action]} AKA {action}"
 
     def __str__(self):
         """String for debug purposes. No particular semantics are required."""
@@ -236,44 +234,130 @@ class JunQiObserver:
         # The observation should contain a 1-D tensor in `self.tensor` and a
         # dictionary of views onto the tensor, which may be of any shape.
         # Here the observation is indexed `(cell state, row, column)`.
-        self.shape = (_NUM_CHESS_TYPE + 2, _NUM_ROWS, _NUM_COLS)
+        # TODO: Add interface for the number of moves of history
+
+        self.num_history_move: int = 20
+        scalar_sha: int = 1
+        prev_select_sha: int = 1
+        # Observation components. See paper page 37.
+        # Note that we deleted "lakes on the map".
+        #                                    Private Info.     Public Info. -i    Public Info. i   Move m i
+        self.shape = (
+        _NUM_ROWS, _NUM_COLS, (_NUM_CHESS_TYPES + _NUM_CHESS_TYPES + _NUM_CHESS_TYPES + self.num_history_move +
+                               scalar_sha + scalar_sha + scalar_sha + scalar_sha + prev_select_sha))
+        #                                    Remain Len.  Remain Mov.  Game Phase   Pha.Sele.Mov. Prev. Selectoin
+
         self.tensor = np.zeros(np.prod(self.shape), np.float32)
         self.dict = {"observation": np.reshape(self.tensor, self.shape)}
+
+        self.mov_idx: int = 0
 
     def set_from(self, state, player):
         """Updates `tensor` and `dict` to reflect `state` from PoV of `player`."""
         # We update the observation via the shaped tensor since indexing is more
         # convenient than with the 1-D tensor. Both are views onto the same memory.
+        _idx = 0
         obs = self.dict["observation"]
+        prev_obs = copy.deepcopy(obs)
         obs.fill(0)
+
+        # The player’s own private information.
+        # Shape: _NUM_ROWS * _NUM_COLS * _NUM_CHESS_TYPES tensor
+        pri = obs[:][:][0:_NUM_CHESS_TYPES]
         for row in range(_NUM_ROWS):
             for col in range(_NUM_COLS):
-                if state.board[row][col].country == player:
-                    cell_state = _DICT_CHESS_CELL[int(repr(state.board[row][col]))]
-                elif state.board[row][col].country == 1 - player:
-                    cell_state = 7
-                else:
-                    cell_state = 0
-                obs[cell_state, row, col] = 1
+                chess = state.board[row][col]
+                if chess.country == player:
+                    pri[_DICT_CHESS_CELL[chess.type]] = 1
+        obs[:][:][0:_NUM_CHESS_TYPES] = pri
+
+        # The opponent’s public information.
+        # Contains all 0’s during the deployment phase.
+        # Shape: _NUM_ROWS * _NUM_COLS * _NUM_CHESS_TYPES tensor
+        pub_oppo = obs[:][:][_NUM_CHESS_TYPES:2 * _NUM_CHESS_TYPES]
+        for row in range(_NUM_ROWS):
+            if state.game_phase == GamePhase.DEPLOYING:
+                break
+            for col in range(_NUM_COLS):
+                chess = state.board[row][col]
+                if not chess.country == 1 - player:
+                    continue
+                # ...
+                # TODO: Add the situation "if the piece at (r, c) is known to have type t".
+                #       For example 40 died and then the position of the flag
+                #       should be a public information.
+                # ...
+        # TODO: To be countinued
+        obs[:][:][_NUM_CHESS_TYPES:2 * _NUM_CHESS_TYPES - 1] = pub_oppo
+
+        # The player’s own public information.
+        # This informs i on the information −i has on i’s pieces.
+        # Contains all 0’s during the deployment phase
+        # Shape: _NUM_ROWS * _NUM_COLS * _NUM_CHESS_TYPES tensor
+        pub_self = obs[:][:][2 * _NUM_CHESS_TYPES:3 * _NUM_CHESS_TYPES]
+        for row in range(_NUM_ROWS):
+            if state.game_phase == GamePhase.DEPLOYING:
+                break
+            for col in range(_NUM_COLS):
+                chess = state.board[row][col]
+                if not chess.country == 1 - player:
+                    continue
+                # ...
+                # TODO: Add the situation "if the piece at (r, c) is known to have type t".
+                #       For example 40 died and then the position of the flag
+                #       should be a public information.
+                # ...
+        # TODO: To be countinued
+        obs[:][:][2 * _NUM_CHESS_TYPES:3 * _NUM_CHESS_TYPES] = pub_self
+
+        # An encoding of the last 40(or other number) moves.
+        # Here we used a scrolling index.
+        # Shape: _NUM_ROWS * _NUM_COLS * self.num_history_move tensor
+        # TODO: Need changes in state
+        _idx = 3 * _NUM_CHESS_TYPES + self.num_history_move
+        mov = obs[:][:][3 * _NUM_CHESS_TYPES:_idx]
+        mov[self.mov_idx] = state.obs_mov
+        self.mov_idx = self.mov_idx + 1 if self.mov_idx < self.num_history_move else 0
+
+        # The ratio of the game length to the maximum length
+        # before the game is considered a draw.
+        # Shape: Scalar -> _NUM_COLS * _NUM_ROWS * 1 tensor
+        obs[:][:][_idx + i] = _GAME_INFO.max_game_length  # TODO: Need changes in state
+        _idx += 1
+
+        # The ratio of the number of moves since the last attack
+        # to the maximum number of moves without attack before
+        # the game is considered a draw.
+        # Shape: Scalar -> _NUM_COLS * _NUM_ROWS * 1 tensor
+        obs[:][:][_idx + i] = prev_obs[:][:][0] - 1  # TODO: Need changes in state
+        _idx += 1
+
+        # The phase of the game.
+        # Either deployment (1) or play (0).
+        # Shape: Scalar -> _NUM_COLS * _NUM_ROWS * 1 tensor
+        obs[:][:][_idx] = 1 if state.game_phase == GamePhase.DEPLOYING else 0
+        _idx += 1
+
+        # An indication of whether the agent needs to select a
+        # piece (0) or target square (1) for an already selected piece.
+        # 0 during deployment phase.
+        # Shape: Scalar -> _NUM_COLS * _NUM_ROWS * 1 tensor
+        obs[:][:][_idx] = 1 if state.game_phase == GamePhase.MOVING else 0
+        _idx += 1
+
+        # The piece selected in the previous step (1 for the selected
+        # piece, 0 elsewhere), if applicable, otherwise all 0’s.
+        # Shape: _NUM_COLS * _NUM_ROWS tensor -> _NUM_COLS * _NUM_ROWS * 1 tensor
 
     def string_from(self, state, player):
         """Observation of `state` from the PoV of `player`, as a string."""
-        s = ""
-        for row in range(_NUM_ROWS):
-            for col in range(_NUM_COLS):
-                if state.board[row][col].country == player:
-                    s += str(_DICT_CHESS_CELL[int(repr(state.board[row][col]))])
-                elif state.board[row][col].country == 1 - player:
-                    s += str(_NUM_CHESS_TYPE+1)
-                else:
-                    s += str(0)
-            s += "\n"
-        return s
+        # TODO: Add string formed observation for debugging and logging.
+        pass
 
 
 # Helper functions for game details.
 
-_NUM_CHESS_TYPE = 6
+_NUM_CHESS_TYPES = 6
 _DICT_CHESS_CELL = {9: 6, 8: 5, 7: 4, 6: 3, 2: 2, 1: 1, 0: 0}
 flatten_actions = [[0, 0], [0, 0]] * (_NUM_COLS * _NUM_ROWS) ** 2
 
@@ -281,6 +365,7 @@ flatten_actions = [[0, 0], [0, 0]] * (_NUM_COLS * _NUM_ROWS) ** 2
 class Chess():
     def __init__(self, num=-10, country=-1):
         self.num = num
+        self.type = ChessType(num)
         self.country = country if num != 0 else -1
 
     def __str__(self):
